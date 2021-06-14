@@ -149,19 +149,19 @@ namespace Bev.Instruments.EplusE.E2EExx
         private bool IsIncorrect(byte[] buffer)
         {
             if (buffer.Length != 6)
-                return false;
+                return true;
             if (buffer[0] != 0x51)  // [B]
-                return false;
+                return true;
             if (buffer[1] != 0x03)  // [L]
-                return false;
+                return true;
             if (buffer[2] != 0x06)  // [S]
-                return false;
+                return true;
             if (buffer[3] != 0x00)  // [F]
-                return false;
+                return true;
             byte crc = (byte)(buffer[0] + buffer[1] + buffer[2] + buffer[3] + buffer[4]);
             if (buffer[5] != crc)   // [C]
-                return false;
-            return true;
+                return true;
+            return false;
         }
 
         private void OpenPort()
