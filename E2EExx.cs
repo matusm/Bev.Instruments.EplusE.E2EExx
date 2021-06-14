@@ -1,19 +1,17 @@
 ﻿using System;
 using System.IO.Ports;
 using System.Threading;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Bev.Instruments.EplusE.E2EExx
 {
     public class E2EExx
     {
         private static SerialPort comPort;
-        private const string genericString = "???";     // returned if something failed
-        private int delayTimeForRespond = 400;    // rather long delay necessary
+        private const string genericString = "???"; // returned if something failed
+        private int delayTimeForRespond = 400;      // rather long delay necessary
         // https://docs.microsoft.com/en-us/dotnet/api/system.io.ports.serialport.close?view=dotnet-plat-ext-5.0
-        private const int waitOnClose = 100;             // No actual value is given, experimental
-
+        private const int waitOnClose = 100;        // No actual value is given, experimental
+        private const int waitOnOpen = 100;
 
         public E2EExx(string portName)
         {
@@ -21,7 +19,6 @@ namespace Bev.Instruments.EplusE.E2EExx
             comPort = new SerialPort(DevicePort, 9600);
             comPort.RtsEnable = true;   // this is essential
             comPort.DtrEnable = true;	// this is essential
-            OpenPort();
         }
 
         public string DevicePort { get; }
@@ -100,11 +97,11 @@ namespace Bev.Instruments.EplusE.E2EExx
 
         private byte QueryE2(byte address)
         {
-            //OpenPort(); //Thread.Sleep(delayTimeForRespond*2);
+            OpenPort();
             SendSerialBus(ComposeCommand(address));
             Thread.Sleep(delayTimeForRespond);
             byte response = ReadByte();
-            //ClosePort(); //Thread.Sleep(delayTimeForRespond);
+            //ClosePort();
             return response;
         }
 
@@ -139,9 +136,8 @@ namespace Bev.Instruments.EplusE.E2EExx
                 byte[] buffer = new byte[comPort.BytesToRead];
                 comPort.Read(buffer, 0, buffer.Length);
                 Console.WriteLine($">>> ReadByte -> {BytesToString(buffer)}");
-                if (buffer.Length != 6)
+                if(IsIncorrect(buffer))
                     return errorByte;
-                // TODO check syntax of response
                 return buffer[4];
             }
             catch (Exception)
@@ -150,12 +146,34 @@ namespace Bev.Instruments.EplusE.E2EExx
             }
         }
 
+        private bool IsIncorrect(byte[] buffer)
+        {
+            if (buffer.Length != 6)
+                return false;
+            if (buffer[0] != 0x51)  // [B]
+                return false;
+            if (buffer[1] != 0x03)  // [L]
+                return false;
+            if (buffer[2] != 0x06)  // [S]
+                return false;
+            if (buffer[3] != 0x00)  // [F]
+                return false;
+            byte crc = (byte)(buffer[0] + buffer[1] + buffer[2] + buffer[3] + buffer[4]);
+            if (buffer[5] != crc)   // [C]
+                return false;
+            return true;
+        }
+
         private void OpenPort()
         {
             try
             {
                 if (!comPort.IsOpen)
+                {
                     comPort.Open();
+                    Thread.Sleep(waitOnOpen);
+                }
+                    
             }
             catch (Exception)
             { }
