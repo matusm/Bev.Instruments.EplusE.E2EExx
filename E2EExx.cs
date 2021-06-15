@@ -7,11 +7,10 @@ namespace Bev.Instruments.EplusE.E2EExx
     public class E2EExx
     {
         private static SerialPort comPort;
-        private const string genericString = "???"; // returned if something failed
+        private const string defaultString = "???"; // returned if something failed
         private int delayTimeForRespond = 400;      // rather long delay necessary
-        // https://docs.microsoft.com/en-us/dotnet/api/system.io.ports.serialport.close?view=dotnet-plat-ext-5.0
-        private const int waitOnClose = 100;        // No actual value is given, experimental
-        private const int waitOnOpen = 100;
+        private const int delayOnPortClose = 100;   // No actual value is given, experimental
+        private const int delayOnPortOpen = 100;
 
         public E2EExx(string portName)
         {
@@ -30,6 +29,8 @@ namespace Bev.Instruments.EplusE.E2EExx
 
         private double Temperature { get; set; }
         private double Humidity { get; set; }
+        public double Value3 { get; set; }
+        public double Value4 { get; set; }
 
         public int DelayTimeForRespond { get => delayTimeForRespond; set => delayTimeForRespond = value; }
 
@@ -48,32 +49,43 @@ namespace Bev.Instruments.EplusE.E2EExx
         private void UpdateValues()
         {
             ClearCachedValues();
-            byte humLowByte = QueryE2(0x81);
-            byte humHighByte = QueryE2(0x91);
-            byte tempLowByte = QueryE2(0xA1);
-            byte tempHighByte = QueryE2(0xB1);
-            byte statusByte = QueryE2(0x71);
+            byte? humLowByte = QueryE2(0x81);
+            byte? humHighByte = QueryE2(0x91);
+            byte? tempLowByte = QueryE2(0xA1);
+            byte? tempHighByte = QueryE2(0xB1);
+            byte? value3LowByte = QueryE2(0xC1);
+            byte? value3HighByte = QueryE2(0xD1);
+            byte? value4LowByte = QueryE2(0xE1);
+            byte? value4HighByte = QueryE2(0xD1);
+            byte? statusByte = QueryE2(0x71);
             if (statusByte != 0x00)
-            {
-                Console.WriteLine($">>> {statusByte,2:X2}");
                 return;
-            }
-                
-            Humidity = ((uint)humLowByte + (uint)humHighByte * 256) / 100.0;
-            Temperature = ((uint)tempLowByte + (uint)tempHighByte * 256) / 100.0 - 273.15;
+            if (humLowByte.HasValue && humHighByte.HasValue)
+                Humidity = (humLowByte.Value + humHighByte.Value * 256.0) / 100.0;
+            if (tempLowByte.HasValue && tempHighByte.HasValue)
+                Temperature = (tempLowByte.Value + tempHighByte.Value * 256.0) / 100.0 - 273.15;
+            if (value3LowByte.HasValue && value3HighByte.HasValue)
+                Value3 = value3LowByte.Value + value3HighByte.Value * 256.0;
+            if (value4LowByte.HasValue && value4HighByte.HasValue)
+                Value4 = value4LowByte.Value + value4HighByte.Value * 256.0;
         }
 
         private string GetInstrumentType()
         {
-            byte groupLowByte = QueryE2(0x11);
-            byte subGroupByte = QueryE2(0x21);
-            byte groupHighByte = QueryE2(0x41);
-
+            byte? groupLowByte = QueryE2(0x11);
+            if (!groupLowByte.HasValue)
+                return defaultString;
+            byte? subGroupByte = QueryE2(0x21);
+            if (!subGroupByte.HasValue)
+                return defaultString;
+            byte? groupHighByte = QueryE2(0x41);
+            if (!groupHighByte.HasValue)
+                return defaultString;
             if (groupHighByte == 0x55 || groupHighByte == 0xFF)
                 groupHighByte = 0x00;
-            int productSeries = groupHighByte * 256 + groupLowByte;
-            int outputType = (subGroupByte >> 4) & 0x0F;
-            int ftType = subGroupByte & 0x0F;
+            int productSeries = groupHighByte.Value * 256 + groupLowByte.Value;
+            int outputType = (subGroupByte.Value >> 4) & 0x0F;
+            int ftType = subGroupByte.Value & 0x0F;
             string typeAsString = "EE";
             if (productSeries >= 100)
                 typeAsString += $"{productSeries}";
@@ -87,21 +99,21 @@ namespace Bev.Instruments.EplusE.E2EExx
 
         private string GetInstrumentSerialNumber()
         {
-            return genericString;
+            return defaultString;
         }
 
         private string GetInstrumentVersion()
         {
-            return genericString;
+            return defaultString;
         }
 
-        private byte QueryE2(byte address)
+        private byte? QueryE2(byte address)
         {
             OpenPort();
             SendSerialBus(ComposeCommand(address));
             Thread.Sleep(delayTimeForRespond);
-            byte response = ReadByte();
-            //ClosePort();
+            var response = ReadByte();
+            // ClosePort();
             return response;
         }
 
@@ -128,21 +140,20 @@ namespace Bev.Instruments.EplusE.E2EExx
             }
         }
 
-        private byte ReadByte()
+        private byte? ReadByte()
         {
-            byte errorByte = 0xFF;
             try
             {
                 byte[] buffer = new byte[comPort.BytesToRead];
                 comPort.Read(buffer, 0, buffer.Length);
                 Console.WriteLine($">>> ReadByte -> {BytesToString(buffer)}");
-                if(IsIncorrect(buffer))
-                    return errorByte;
+                if (IsIncorrect(buffer))
+                    return null;
                 return buffer[4];
             }
             catch (Exception)
             {
-                return errorByte;
+                return null;
             }
         }
 
@@ -171,9 +182,9 @@ namespace Bev.Instruments.EplusE.E2EExx
                 if (!comPort.IsOpen)
                 {
                     comPort.Open();
-                    Thread.Sleep(waitOnOpen);
+                    Thread.Sleep(delayOnPortOpen);
                 }
-                    
+
             }
             catch (Exception)
             { }
@@ -186,7 +197,7 @@ namespace Bev.Instruments.EplusE.E2EExx
                 if (comPort.IsOpen)
                 {
                     comPort.Close();
-                    Thread.Sleep(waitOnClose);
+                    Thread.Sleep(delayOnPortClose);
                 }
             }
             catch (Exception)
@@ -203,4 +214,21 @@ namespace Bev.Instruments.EplusE.E2EExx
         }
 
     }
+
+    public struct E2Return
+    {
+        public byte by;
+        public bool st; // true -> error
+    }
+
+    public enum E2ErrorType
+    {
+        Unknown,
+        NoError,
+        CrcError,
+        LengthError,
+        NakError,
+        CodeError
+    }
+
 }
