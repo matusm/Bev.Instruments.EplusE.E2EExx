@@ -8,9 +8,14 @@ namespace Bev.Instruments.EplusE.E2EExx
     {
         private static SerialPort comPort;
         private const string defaultString = "???"; // returned if something failed
-        private int delayTimeForRespond = 400;      // rather long delay necessary
-        private const int delayOnPortClose = 100;   // No actual value is given, experimental
-        private const int delayOnPortOpen = 100;
+        private int delayTimeForRespond = 50;       // rather long delay necessary
+        private const int delayOnPortClose = 50;    // No actual value is given, experimental
+        private const int delayOnPortOpen = 50;
+
+        private bool humidityAvailable;
+        private bool temperatureAvailable;
+        private bool airVelocityAvailable;
+        private bool co2Available;
 
         public E2EExx(string portName)
         {
@@ -29,21 +34,21 @@ namespace Bev.Instruments.EplusE.E2EExx
 
         private double Temperature { get; set; }
         private double Humidity { get; set; }
-        public double Value3 { get; set; }
-        public double Value4 { get; set; }
-
-        public int DelayTimeForRespond { get => delayTimeForRespond; set => delayTimeForRespond = value; }
+        private double Value3 { get; set; }
+        private double Value4 { get; set; }
 
         public MeasurementValues GetValues()
         {
             UpdateValues();
-            return new MeasurementValues(Temperature, Humidity);
+            return new MeasurementValues(Temperature, Humidity, Value3, Value4);
         }
 
         private void ClearCachedValues()
         {
             Temperature = double.NaN;
             Humidity = double.NaN;
+            Value3 = double.NaN;
+            Value4 = double.NaN;
         }
 
         private void UpdateValues()
@@ -53,10 +58,6 @@ namespace Bev.Instruments.EplusE.E2EExx
             byte? humHighByte = QueryE2(0x91);
             byte? tempLowByte = QueryE2(0xA1);
             byte? tempHighByte = QueryE2(0xB1);
-            byte? value3LowByte = QueryE2(0xC1);
-            byte? value3HighByte = QueryE2(0xD1);
-            byte? value4LowByte = QueryE2(0xE1);
-            byte? value4HighByte = QueryE2(0xD1);
             byte? statusByte = QueryE2(0x71);
             if (statusByte != 0x00)
                 return;
@@ -64,10 +65,44 @@ namespace Bev.Instruments.EplusE.E2EExx
                 Humidity = (humLowByte.Value + humHighByte.Value * 256.0) / 100.0;
             if (tempLowByte.HasValue && tempHighByte.HasValue)
                 Temperature = (tempLowByte.Value + tempHighByte.Value * 256.0) / 100.0 - 273.15;
-            if (value3LowByte.HasValue && value3HighByte.HasValue)
-                Value3 = value3LowByte.Value + value3HighByte.Value * 256.0;
-            if (value4LowByte.HasValue && value4HighByte.HasValue)
-                Value4 = value4LowByte.Value + value4HighByte.Value * 256.0;
+        }
+
+        private void UpdateAllValues()
+        {
+            byte? humLowByte, humHighByte;
+            byte? tempLowByte, tempHighByte;
+            byte? value3LowByte, value3HighByte;
+            byte? value4LowByte, value4HighByte;
+            ClearCachedValues();
+            GetAvailableValues();
+            if (humidityAvailable)
+            {
+                humLowByte = QueryE2(0x81);
+                humHighByte = QueryE2(0x91);
+                if (humLowByte.HasValue && humHighByte.HasValue)
+                    Humidity = (humLowByte.Value + humHighByte.Value * 256.0) / 100.0;
+            }
+            if (temperatureAvailable)
+            {
+                tempLowByte = QueryE2(0xA1);
+                tempHighByte = QueryE2(0xB1);
+                if (tempLowByte.HasValue && tempHighByte.HasValue)
+                    Temperature = (tempLowByte.Value + tempHighByte.Value * 256.0) / 100.0 - 273.15;
+            }
+            if (co2Available || airVelocityAvailable)
+            {
+                value3LowByte = QueryE2(0xC1);
+                value3HighByte = QueryE2(0xD1);
+                value4LowByte = QueryE2(0xE1);
+                value4HighByte = QueryE2(0xD1);
+                if (value3LowByte.HasValue && value3HighByte.HasValue)
+                    Value3 = value3LowByte.Value + value3HighByte.Value * 256.0;
+                if (value4LowByte.HasValue && value4HighByte.HasValue)
+                    Value4 = value4LowByte.Value + value4HighByte.Value * 256.0;
+            }
+            byte? statusByte = QueryE2(0x71);
+            if (statusByte != 0x00)
+                ClearCachedValues();
         }
 
         private string GetInstrumentType()
@@ -75,14 +110,18 @@ namespace Bev.Instruments.EplusE.E2EExx
             byte? groupLowByte = QueryE2(0x11);
             if (!groupLowByte.HasValue)
                 return defaultString;
+
             byte? subGroupByte = QueryE2(0x21);
             if (!subGroupByte.HasValue)
                 return defaultString;
+
             byte? groupHighByte = QueryE2(0x41);
             if (!groupHighByte.HasValue)
                 return defaultString;
+
             if (groupHighByte == 0x55 || groupHighByte == 0xFF)
                 groupHighByte = 0x00;
+
             int productSeries = groupHighByte.Value * 256 + groupLowByte.Value;
             int outputType = (subGroupByte.Value >> 4) & 0x0F;
             int ftType = subGroupByte.Value & 0x0F;
@@ -95,6 +134,30 @@ namespace Bev.Instruments.EplusE.E2EExx
                 typeAsString += $"-{outputType}";
             typeAsString += $" FT{ftType}";
             return typeAsString;
+        }
+
+        private void GetAvailableValues()
+        {
+            byte? bitPattern = QueryE2(0x31);
+            if(bitPattern.HasValue)
+            {
+                humidityAvailable = BitIsSet(bitPattern.Value, 0);
+                temperatureAvailable = BitIsSet(bitPattern.Value, 1);
+                airVelocityAvailable = BitIsSet(bitPattern.Value, 2);
+                co2Available = BitIsSet(bitPattern.Value, 3);
+            }
+        }
+
+        private bool BitIsSet(byte bitPattern, int place)
+        {
+            if (place < 0)
+                return false;
+            if (place >= 8)
+                return false;
+            var b = (bitPattern >> place) & 0x01;
+            if (b == 0x00)
+                return false;
+            return true;
         }
 
         private string GetInstrumentSerialNumber()
@@ -110,7 +173,7 @@ namespace Bev.Instruments.EplusE.E2EExx
         private byte? QueryE2(byte address)
         {
             OpenPort();
-            SendSerialBus(ComposeCommand(address));
+            SendCommand(ComposeCommand(address));
             Thread.Sleep(delayTimeForRespond);
             var response = ReadByte();
             // ClosePort();
@@ -127,7 +190,7 @@ namespace Bev.Instruments.EplusE.E2EExx
             return buffer;
         }
 
-        private void SendSerialBus(byte[] command)
+        private void SendCommand(byte[] command)
         {
             try
             {
@@ -146,8 +209,8 @@ namespace Bev.Instruments.EplusE.E2EExx
             {
                 byte[] buffer = new byte[comPort.BytesToRead];
                 comPort.Read(buffer, 0, buffer.Length);
-                Console.WriteLine($">>> ReadByte -> {BytesToString(buffer)}");
-                if (IsIncorrect(buffer))
+                // Console.WriteLine($">>> ReadByte -> {BytesToString(buffer)}");
+                if (IsFaulty(buffer))
                     return null;
                 return buffer[4];
             }
@@ -157,7 +220,7 @@ namespace Bev.Instruments.EplusE.E2EExx
             }
         }
 
-        private bool IsIncorrect(byte[] buffer)
+        private bool IsFaulty(byte[] buffer)
         {
             if (buffer.Length != 6)
                 return true;
@@ -213,22 +276,6 @@ namespace Bev.Instruments.EplusE.E2EExx
             return str;
         }
 
-    }
-
-    public struct E2Return
-    {
-        public byte by;
-        public bool st; // true -> error
-    }
-
-    public enum E2ErrorType
-    {
-        Unknown,
-        NoError,
-        CrcError,
-        LengthError,
-        NakError,
-        CodeError
     }
 
 }
