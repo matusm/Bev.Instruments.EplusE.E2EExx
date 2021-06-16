@@ -23,7 +23,6 @@ namespace Bev.Instruments.EplusE.E2EExx
             comPort = new SerialPort(DevicePort, 9600);
             comPort.RtsEnable = true;   // this is essential
             comPort.DtrEnable = true;	// this is essential
-            GetAvailableValues();
         }
 
         public string DevicePort { get; }
@@ -41,6 +40,7 @@ namespace Bev.Instruments.EplusE.E2EExx
         public MeasurementValues GetValues()
         {
             UpdateValues();
+            //ClosePort(); // Humidity drifts after OpenPort!
             return new MeasurementValues(Temperature, Humidity, Value3, Value4);
         }
 
@@ -53,22 +53,6 @@ namespace Bev.Instruments.EplusE.E2EExx
         }
 
         private void UpdateValues()
-        {
-            ClearCachedValues();
-            byte? humLowByte = QueryE2(0x81);
-            byte? humHighByte = QueryE2(0x91);
-            byte? tempLowByte = QueryE2(0xA1);
-            byte? tempHighByte = QueryE2(0xB1);
-            byte? statusByte = QueryE2(0x71);
-            if (statusByte != 0x00)
-                return;
-            if (humLowByte.HasValue && humHighByte.HasValue)
-                Humidity = (humLowByte.Value + humHighByte.Value * 256.0) / 100.0;
-            if (tempLowByte.HasValue && tempHighByte.HasValue)
-                Temperature = (tempLowByte.Value + tempHighByte.Value * 256.0) / 100.0 - 273.15;
-        }
-
-        private void UpdateAllValues()
         {
             byte? humLowByte, humHighByte;
             byte? tempLowByte, tempHighByte;
@@ -140,14 +124,14 @@ namespace Bev.Instruments.EplusE.E2EExx
         private void GetAvailableValues()
         {
             var bitPattern = QueryE2(0x31);
-            if(bitPattern.HasValue)
+            if (bitPattern.HasValue)
             {
                 humidityAvailable = BitIsSet(bitPattern.Value, 0);
                 temperatureAvailable = BitIsSet(bitPattern.Value, 1);
                 airVelocityAvailable = BitIsSet(bitPattern.Value, 2);
                 co2Available = BitIsSet(bitPattern.Value, 3);
                 // this is for the EE08 with 0x21
-                if(bitPattern.Value == 0x21)
+                if (bitPattern.Value == 0x21)
                 {
                     temperatureAvailable = true;
                 }
