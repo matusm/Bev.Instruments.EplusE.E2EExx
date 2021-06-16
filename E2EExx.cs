@@ -23,6 +23,7 @@ namespace Bev.Instruments.EplusE.E2EExx
             comPort = new SerialPort(DevicePort, 9600);
             comPort.RtsEnable = true;   // this is essential
             comPort.DtrEnable = true;	// this is essential
+            GetAvailableValues();
         }
 
         public string DevicePort { get; }
@@ -138,13 +139,18 @@ namespace Bev.Instruments.EplusE.E2EExx
 
         private void GetAvailableValues()
         {
-            byte? bitPattern = QueryE2(0x31);
+            var bitPattern = QueryE2(0x31);
             if(bitPattern.HasValue)
             {
                 humidityAvailable = BitIsSet(bitPattern.Value, 0);
                 temperatureAvailable = BitIsSet(bitPattern.Value, 1);
                 airVelocityAvailable = BitIsSet(bitPattern.Value, 2);
                 co2Available = BitIsSet(bitPattern.Value, 3);
+                // this is for the EE08 with 0x21
+                if(bitPattern.Value == 0x21)
+                {
+                    temperatureAvailable = true;
+                }
             }
         }
 
