@@ -6,7 +6,7 @@ namespace Bev.Instruments.EplusE.E2EExx
 {
     public class E2EExx
     {
-        private static SerialPort comPort;
+        private readonly SerialPort comPort;
         private const string defaultString = "???"; // returned if something failed
         private int delayTimeForRespond = 50;       // rather long delay necessary
         private const int delayOnPortClose = 50;    // No actual value is given, experimental
